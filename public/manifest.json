@@ -1,0 +1,24 @@
+{
+  "name": "Akshat Popat | Future CA & CEO",
+  "short_name": "Akshat Popat",
+  "description": "Executive Portfolio of Akshat Popat, Future CA & CEO",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#050505",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://i.ibb.co/HT3GLhVg/Adobe-Express-file.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://i.ibb.co/HT3GLhVg/Adobe-Express-file.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
