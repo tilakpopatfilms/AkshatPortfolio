@@ -4,18 +4,6 @@
  */
 
 import { useEffect, useRef, useState, FormEvent } from "react";
-import { User } from "firebase/auth";
-import {
-  initAuth,
-  googleSignIn,
-  googleSignOut,
-  loadFormsConfig,
-  saveFormsConfig,
-  parsePrefilledUrl,
-  fetchFormResponses,
-  GoogleFormsConfig,
-  FormResponseData
-} from "./lib/firebase";
 
 export default function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -39,183 +27,6 @@ export default function App() {
   const arrowGroupRef = useRef<SVGGElement | null>(null);
   const arrowHeadRef = useRef<SVGPathElement | null>(null);
 
-  // Google Forms Configuration and Admin states
-  const [formsConfig, setFormsConfig] = useState<GoogleFormsConfig | null>(null);
-  const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
-  const [adminUser, setAdminUser] = useState<User | null>(null);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<{ loading: boolean; success: boolean; error: string | null }>({
-    loading: false,
-    success: false,
-    error: null
-  });
-
-  // Prefilled url parsing state
-  const [pastedUrl, setPastedUrl] = useState("");
-  const [parseResult, setParseResult] = useState<{ success: boolean; message: string | null }>({
-    success: false,
-    message: null
-  });
-
-  // Manual configurations state
-  const [manualConfig, setManualConfig] = useState<Partial<GoogleFormsConfig>>({
-    formId: "",
-    nameEntryId: "",
-    emailEntryId: "",
-    subjectEntryId: "",
-    messageEntryId: "",
-    isEnabled: false,
-    useWeb3Forms: true
-  });
-
-  // Google Forms responses viewing states
-  const [responses, setResponses] = useState<FormResponseData[]>([]);
-  const [loadingResponses, setLoadingResponses] = useState(false);
-  const [responsesError, setResponsesError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [activeTab, setActiveTab] = useState<"settings" | "responses">("settings");
-
-  // Load configuration on boot
-  useEffect(() => {
-    const fetchConfig = async () => {
-      const cfg = await loadFormsConfig();
-      if (cfg) {
-        setFormsConfig(cfg);
-        setManualConfig(cfg);
-      }
-    };
-    fetchConfig();
-  }, []);
-
-  // Initialize auth listener
-  useEffect(() => {
-    const unsubscribe = initAuth(
-      (user) => {
-        setIsAdminLoggedIn(true);
-        setAdminUser(user);
-      },
-      () => {
-        setIsAdminLoggedIn(false);
-        setAdminUser(null);
-      }
-    );
-    return () => unsubscribe();
-  }, []);
-
-  // Fetch submissions when responses tab is opened
-  useEffect(() => {
-    if (isAdminOpen && isAdminLoggedIn && activeTab === "responses" && formsConfig?.formId) {
-      handleLoadSubmissions();
-    }
-  }, [isAdminOpen, isAdminLoggedIn, activeTab, formsConfig?.formId]);
-
-  const handleLoadSubmissions = async () => {
-    if (!formsConfig?.formId) {
-      setResponsesError("No Google Form ID is configured.");
-      return;
-    }
-    setLoadingResponses(true);
-    setResponsesError(null);
-    try {
-      const fetched = await fetchFormResponses(formsConfig.formId);
-      setResponses(fetched);
-    } catch (err: any) {
-      setResponsesError(err.message || "Failed to load submissions. Ensure your Form ID is valid and has read permissions.");
-    } finally {
-      setLoadingResponses(false);
-    }
-  };
-
-  const handleLogin = async () => {
-    setIsLoggingIn(true);
-    try {
-      const res = await googleSignIn();
-      if (res) {
-        setIsAdminLoggedIn(true);
-        setAdminUser(res.user);
-      }
-    } catch (err) {
-      console.error("Login failed:", err);
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await googleSignOut();
-      setIsAdminLoggedIn(false);
-      setAdminUser(null);
-      setResponses([]);
-    } catch (err) {
-      console.error("Sign out failed:", err);
-    }
-  };
-
-  const handleParseUrl = () => {
-    if (!pastedUrl) {
-      setParseResult({ success: false, message: "Please paste a link first." });
-      return;
-    }
-    const result = parsePrefilledUrl(pastedUrl);
-    if (result.success) {
-      setManualConfig((prev) => ({
-        ...prev,
-        formId: result.formId,
-        nameEntryId: result.autoMap.nameEntry,
-        emailEntryId: result.autoMap.emailEntry,
-        subjectEntryId: result.autoMap.subjectEntry,
-        messageEntryId: result.autoMap.messageEntry
-      }));
-      setParseResult({
-        success: true,
-        message: "Successfully parsed! Form ID and Entry fields have been automatically mapped below."
-      });
-    } else {
-      setParseResult({
-        success: false,
-        message: "Invalid link. Ensure it is a prefilled Google Forms link (containing '/viewform' and 'entry.')."
-      });
-    }
-  };
-
-  const handleSaveConfig = async () => {
-    if (!adminUser) return;
-    setSaveStatus({ loading: true, success: false, error: null });
-
-    const newConfig: GoogleFormsConfig = {
-      formId: manualConfig.formId || "",
-      prefilledUrl: pastedUrl || manualConfig.prefilledUrl || "",
-      nameEntryId: manualConfig.nameEntryId || "",
-      emailEntryId: manualConfig.emailEntryId || "",
-      subjectEntryId: manualConfig.subjectEntryId || "",
-      messageEntryId: manualConfig.messageEntryId || "",
-      isEnabled: !!manualConfig.isEnabled,
-      useWeb3Forms: manualConfig.useWeb3Forms !== false,
-      updatedAt: new Date().toISOString(),
-      updatedBy: adminUser.uid
-    };
-
-    if (!newConfig.formId && newConfig.isEnabled) {
-      setSaveStatus({ loading: false, success: false, error: "Form ID is required to enable Google Forms integration." });
-      return;
-    }
-
-    const success = await saveFormsConfig(newConfig);
-    if (success) {
-      setFormsConfig(newConfig);
-      setSaveStatus({ loading: false, success: true, error: null });
-      setTimeout(() => setSaveStatus((prev) => ({ ...prev, success: false })), 3000);
-    } else {
-      setSaveStatus({
-        loading: false,
-        success: false,
-        error: "Permission denied. Ensure your Google email is authorized to update settings."
-      });
-    }
-  };
-
   // Scroll reveal observer
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -237,26 +48,25 @@ export default function App() {
     };
   }, []);
 
-  // Escape key closer for mobile menu & admin panel
+  // Escape key closer for mobile menu
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (isMenuOpen) setIsMenuOpen(false);
-        if (isAdminOpen) setIsAdminOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isMenuOpen, isAdminOpen]);
+  }, [isMenuOpen]);
 
   // Handle scroll overflow lock on body
   useEffect(() => {
-    if (isMenuOpen || isAdminOpen) {
+    if (isMenuOpen) {
       document.body.classList.add("menu-open");
     } else {
       document.body.classList.remove("menu-open");
     }
-  }, [isMenuOpen, isAdminOpen]);
+  }, [isMenuOpen]);
 
   // Animated GMAWE line path and arrow calculation
   useEffect(() => {
@@ -364,7 +174,7 @@ export default function App() {
     };
   }, []);
 
-  // Unified Form submit handler (supports both Google Forms & Web3Forms)
+  // Web3Forms Form submit handler
   const handleFormSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
@@ -379,93 +189,46 @@ export default function App() {
 
     setFormStatus({ loading: true, error: null, success: null });
 
-    let submitSuccess = false;
-    let googleSuccess = false;
-    let web3Success = false;
+    const fd = new FormData();
+    // Using the validated Web3Forms Access Key from index.html
+    fd.append("access_key", "533237a1-aba8-4707-aaf3-37ecf860a73c");
+    fd.append("name", formData.name);
+    fd.append("email", formData.email);
+    fd.append("subject", formData.subject);
+    fd.append("message", formData.message);
 
-    // 1. Google Forms submission (if enabled)
-    if (formsConfig && formsConfig.isEnabled && formsConfig.formId) {
-      const formUrl = `https://docs.google.com/forms/d/e/${formsConfig.formId}/formResponse`;
-      const bodyParams = new URLSearchParams();
-      if (formsConfig.nameEntryId) bodyParams.append(formsConfig.nameEntryId, formData.name);
-      if (formsConfig.emailEntryId) bodyParams.append(formsConfig.emailEntryId, formData.email);
-      if (formsConfig.subjectEntryId) bodyParams.append(formsConfig.subjectEntryId, formData.subject);
-      if (formsConfig.messageEntryId) bodyParams.append(formsConfig.messageEntryId, formData.message);
-
-      try {
-        await fetch(formUrl, {
-          method: "POST",
-          mode: "no-cors",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded"
-          },
-          body: bodyParams.toString()
-        });
-        googleSuccess = true;
-        submitSuccess = true;
-      } catch (gErr) {
-        console.error("Failed to submit to Google Forms:", gErr);
-      }
-    }
-
-    // 2. Web3Forms submission (if enabled or fallback)
-    const runWeb3 = !formsConfig || !formsConfig.isEnabled || formsConfig.useWeb3Forms;
-    if (runWeb3) {
-      const fd = new FormData();
-      fd.append("access_key", "d826965b-d3cf-41e7-b2e4-48582c1b62d6");
-      fd.append("name", formData.name);
-      fd.append("email", formData.email);
-      fd.append("subject", formData.subject);
-      fd.append("message", formData.message);
-
-      try {
-        const res = await fetch("https://api.web3forms.com/submit", {
-          method: "POST",
-          body: fd
-        });
-        const data = await res.json();
-        if (data.success) {
-          web3Success = true;
-          submitSuccess = true;
-        }
-      } catch (err) {
-        console.error("Failed to submit to Web3Forms:", err);
-      }
-    }
-
-    if (submitSuccess) {
-      let successMsg = "Message sent successfully!";
-      if (googleSuccess && web3Success) {
-        successMsg = "Message sent successfully! Registered on Google Forms and email dispatched.";
-      } else if (googleSuccess) {
-        successMsg = "Inquiry saved directly to Google Forms!";
-      } else if (web3Success) {
-        successMsg = "Message sent successfully! I will get back to you soon.";
-      }
-
-      setFormStatus({
-        loading: false,
-        error: null,
-        success: successMsg
+    try {
+      const res = await fetch("https://api.web3forms.com/submit", {
+        method: "POST",
+        body: fd
       });
-      setFormData({ name: "", email: "", subject: "", message: "" });
-    } else {
+      const data = await res.json();
+      if (data.success) {
+        setFormStatus({
+          loading: false,
+          error: null,
+          success: "Message sent successfully! I will get back to you soon."
+        });
+        setFormData({ name: "", email: "", subject: "", message: "" });
+        setTimeout(() => {
+          setFormStatus((prev) => ({ ...prev, success: null }));
+        }, 5000);
+      } else {
+        setFormStatus({
+          loading: false,
+          error: "Something went wrong. Please try again.",
+          success: null
+        });
+      }
+    } catch (err) {
+      console.error("Failed to submit to Web3Forms:", err);
       setFormStatus({
         loading: false,
-        error: "Failed to send. Please check your network or try again.",
+        error: "Network error. Please check your connection and try again.",
         success: null
       });
     }
   };
-
-  // Filter form responses for search bar
-  const filteredResponses = responses.filter((resp) => {
-    const textToSearch = Object.entries(resp.answers)
-      .map(([k, v]) => `${k} ${v}`)
-      .join(" ")
-      .toLowerCase();
-    return textToSearch.includes(searchTerm.toLowerCase()) || resp.submittedAt.toLowerCase().includes(searchTerm.toLowerCase());
-  });
 
   return (
     <div className="min-h-screen bg-brand-dark text-brand-text font-sans selection:bg-brand-accent1 selection:text-white overflow-x-hidden">
@@ -527,27 +290,33 @@ export default function App() {
         </div>
         <div className="flex flex-col h-full pt-24 px-8">
           <div className="space-y-6">
-            <a
-              href="#about"
-              onClick={() => setIsMenuOpen(false)}
-              className="menu-link block text-xl text-white hover:text-brand-accent1 transition-colors py-3"
-            >
-              About
-            </a>
-            <a
-              href="#portfolio"
-              onClick={() => setIsMenuOpen(false)}
-              className="menu-link block text-xl text-white hover:text-brand-accent1 transition-colors py-3"
-            >
-              Portfolio
-            </a>
-            <a
-              href="#education"
-              onClick={() => setIsMenuOpen(false)}
-              className="menu-link block text-xl text-white hover:text-brand-accent1 transition-colors py-3"
-            >
-              Education
-            </a>
+            <div>
+              <a
+                href="#about"
+                onClick={() => setIsMenuOpen(false)}
+                className="menu-link block text-xl text-white hover:text-brand-accent1 transition-colors py-3"
+              >
+                About
+              </a>
+            </div>
+            <div>
+              <a
+                href="#portfolio"
+                onClick={() => setIsMenuOpen(false)}
+                className="menu-link block text-xl text-white hover:text-brand-accent1 transition-colors py-3"
+              >
+                Portfolio
+              </a>
+            </div>
+            <div>
+              <a
+                href="#education"
+                onClick={() => setIsMenuOpen(false)}
+                className="menu-link block text-xl text-white hover:text-brand-accent1 transition-colors py-3"
+              >
+                Education
+              </a>
+            </div>
             <a
               href="#skills"
               onClick={() => setIsMenuOpen(false)}
@@ -901,14 +670,6 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-6 sm:px-8 flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="text-sm text-brand-muted font-medium flex items-center gap-4 flex-wrap justify-center md:justify-start">
             <span>2026 Akshat Popat. All rights reserved.</span>
-            <span className="text-brand-border hidden sm:inline">•</span>
-            <button
-              onClick={() => setIsAdminOpen(true)}
-              className="hover:text-brand-accent1 transition-colors flex items-center gap-1.5 focus:outline-none cursor-pointer"
-            >
-              <i className="fas fa-lock text-xs"></i>
-              <span>Admin Portal</span>
-            </button>
           </div>
           <div className="flex space-x-6">
             <a href="#" className="text-brand-muted hover:text-white transition-all hover:scale-110 transform">
@@ -926,444 +687,6 @@ export default function App() {
           </div>
         </div>
       </footer>
-
-      {/* Admin Portal Modal */}
-      {isAdminOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-brand-dark/95 backdrop-blur-md overflow-y-auto">
-          <div className="relative w-full max-w-4xl bg-brand-card border border-brand-border rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
-            {/* Header */}
-            <div className="flex items-center justify-between p-6 border-b border-brand-border bg-brand-card/50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-accent1 to-brand-accent2 flex items-center justify-center">
-                  <i className="fas fa-sliders-h text-white"></i>
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold text-white">Executive Control Panel</h3>
-                  <p className="text-xs text-brand-muted">Configure portfolio integrations and monitor communications</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsAdminOpen(false)}
-                className="w-10 h-10 rounded-full bg-brand-dark border border-brand-border hover:border-brand-accent1 hover:text-white flex items-center justify-center transition-all cursor-pointer"
-              >
-                <i className="fas fa-times"></i>
-              </button>
-            </div>
-
-            {/* Main Content */}
-            {!isAdminLoggedIn ? (
-              /* Unauthenticated: Google Sign In */
-              <div className="flex-1 overflow-y-auto p-12 flex flex-col items-center justify-center text-center max-w-md mx-auto">
-                <div className="w-16 h-16 rounded-full bg-brand-accent1/10 border border-brand-accent1/30 flex items-center justify-center mb-6">
-                  <i className="fas fa-shield-alt text-2xl text-brand-accent1"></i>
-                </div>
-                <h4 className="text-2xl font-bold text-white mb-2">Authorized Access Only</h4>
-                <p className="text-sm text-brand-muted mb-8 leading-relaxed">
-                  Authenticate with your Google Workspace credentials to manage integrations and securely inspect submissions.
-                </p>
-
-                {/* Styled Sign In Button */}
-                <button
-                  onClick={handleLogin}
-                  disabled={isLoggingIn}
-                  className="flex items-center gap-3 bg-white hover:bg-neutral-100 text-neutral-800 font-bold px-6 py-3.5 rounded-xl transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer text-sm font-sans"
-                >
-                  {isLoggingIn ? (
-                    <i className="fas fa-spinner animate-spin"></i>
-                  ) : (
-                    <svg className="w-5 h-5" viewBox="0 0 48 48">
-                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                    </svg>
-                  )}
-                  <span>{isLoggingIn ? "Authenticating..." : "Sign in with Google"}</span>
-                </button>
-              </div>
-            ) : (
-              /* Authenticated Dashboard */
-              <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-[500px]">
-                {/* Admin Sidebar Navigation */}
-                <div className="w-full md:w-64 bg-brand-dark/50 border-r border-brand-border p-6 flex flex-col justify-between">
-                  <div className="space-y-6">
-                    {/* User Profile */}
-                    <div className="flex items-center gap-3 pb-6 border-b border-brand-border">
-                      {adminUser?.photoURL ? (
-                        <img src={adminUser.photoURL} alt="Avatar" referrerPolicy="no-referrer" className="w-10 h-10 rounded-full border border-brand-accent1" />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-brand-accent1/20 flex items-center justify-center text-brand-accent1 font-bold">
-                          {adminUser?.email?.charAt(0).toUpperCase() || "A"}
-                        </div>
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-white truncate">{adminUser?.displayName || "Administrator"}</p>
-                        <p className="text-xs text-brand-muted truncate">{adminUser?.email}</p>
-                      </div>
-                    </div>
-
-                    {/* Navigation Buttons */}
-                    <div className="space-y-2">
-                      <button
-                        onClick={() => setActiveTab("settings")}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all cursor-pointer ${
-                          activeTab === "settings"
-                            ? "bg-brand-accent1/15 text-brand-accent1 border border-brand-accent1/20"
-                            : "text-brand-muted hover:text-white hover:bg-white/5 border border-transparent"
-                        }`}
-                      >
-                        <i className="fas fa-cog"></i>
-                        <span>Forms Settings</span>
-                      </button>
-                      <button
-                        onClick={() => setActiveTab("responses")}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all cursor-pointer ${
-                          activeTab === "responses"
-                            ? "bg-brand-accent1/15 text-brand-accent1 border border-brand-accent1/20"
-                            : "text-brand-muted hover:text-white hover:bg-white/5 border border-transparent"
-                        }`}
-                      >
-                        <i className="fas fa-inbox"></i>
-                        <span>View Inquiries</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Sign Out Button */}
-                  <button
-                    onClick={handleLogout}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl text-sm font-semibold border border-red-500/20 transition-all cursor-pointer"
-                  >
-                    <i className="fas fa-sign-out-alt"></i>
-                    <span>Sign Out</span>
-                  </button>
-                </div>
-
-                {/* Tab Views */}
-                <div className="flex-1 overflow-y-auto p-8">
-                  {/* TAB 1: Settings */}
-                  {activeTab === "settings" && (
-                    <div className="space-y-8">
-                      <div>
-                        <h4 className="text-xl font-bold text-white mb-2">Integration Configuration</h4>
-                        <p className="text-sm text-brand-muted">Set up how responses from the collaboration form are processed and dispatched.</p>
-                      </div>
-
-                      {/* Toggles */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {/* Google Forms Toggle */}
-                        <div className="p-5 bg-brand-dark/30 border border-brand-border rounded-2xl flex items-center justify-between gap-4">
-                          <div>
-                            <p className="text-sm font-bold text-white flex items-center gap-2">
-                              <i className="fab fa-google text-brand-accent1"></i>
-                              <span>Google Forms API</span>
-                            </p>
-                            <p className="text-xs text-brand-muted mt-1">Submit inquiries to Google Form</p>
-                          </div>
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={!!manualConfig.isEnabled}
-                              onChange={(e) => setManualConfig({ ...manualConfig, isEnabled: e.target.checked })}
-                              className="sr-only peer"
-                            />
-                            <div className="w-11 h-6 bg-brand-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-accent1"></div>
-                          </label>
-                        </div>
-
-                        {/* Web3Forms Toggle */}
-                        <div className="p-5 bg-brand-dark/30 border border-brand-border rounded-2xl flex items-center justify-between gap-4">
-                          <div>
-                            <p className="text-sm font-bold text-white flex items-center gap-2">
-                              <i className="fas fa-envelope text-brand-accent2"></i>
-                              <span>Web3Forms Email</span>
-                            </p>
-                            <p className="text-xs text-brand-muted mt-1">Dispatch copies directly to your inbox</p>
-                          </div>
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={manualConfig.useWeb3Forms !== false}
-                              onChange={(e) => setManualConfig({ ...manualConfig, useWeb3Forms: e.target.checked })}
-                              className="sr-only peer"
-                            />
-                            <div className="w-11 h-6 bg-brand-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-accent2"></div>
-                          </label>
-                        </div>
-                      </div>
-
-                      {/* Google Forms Auto Config Box */}
-                      <div className="p-6 bg-brand-dark/40 border border-brand-accent1/20 rounded-2xl space-y-4">
-                        <div>
-                          <h5 className="text-sm font-bold text-white">Auto-Configuration via Prefilled Link</h5>
-                          <p className="text-xs text-brand-muted mt-1 leading-relaxed">
-                            To find your prefilled URL: Open your Google Form &gt; Click the 3-dots top right &gt; Select 'Get pre-filled link' &gt; Answer questions with unique tags (e.g. 'Name', 'Email', 'Subject', 'Message') &gt; Click 'Get link' and paste it here!
-                          </p>
-                        </div>
-
-                        <div className="flex flex-col sm:flex-row gap-3">
-                          <input
-                            type="text"
-                            placeholder="Paste your pre-filled Google Form URL here..."
-                            value={pastedUrl}
-                            onChange={(e) => setPastedUrl(e.target.value)}
-                            className="flex-1 bg-brand-dark border border-brand-border rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-accent1"
-                          />
-                          <button
-                            type="button"
-                            onClick={handleParseUrl}
-                            className="bg-brand-accent1 hover:bg-brand-accent1/90 text-white font-semibold text-xs px-5 py-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                          >
-                            <i className="fas fa-wand-magic-sparkles"></i>
-                            <span>Auto-Map</span>
-                          </button>
-                        </div>
-
-                        {parseResult.message && (
-                          <div className={`p-3.5 rounded-xl text-xs font-medium flex items-start gap-2 ${
-                            parseResult.success ? "bg-green-500/10 text-green-400 border border-green-500/20" : "bg-red-500/10 text-red-400 border border-red-500/20"
-                          }`}>
-                            <i className={`fas ${parseResult.success ? "fa-check-circle" : "fa-exclamation-circle"} mt-0.5`}></i>
-                            <span>{parseResult.message}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Config Form Fields */}
-                      <div className="border-t border-brand-border pt-6 space-y-4">
-                        <h5 className="text-sm font-bold text-white uppercase tracking-wider">Field Parameters</h5>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-xs text-brand-muted font-medium mb-1.5">Google Form ID</label>
-                            <input
-                              type="text"
-                              value={manualConfig.formId || ""}
-                              onChange={(e) => setManualConfig({ ...manualConfig, formId: e.target.value })}
-                              placeholder="e.g. 1FAIpQLSfDxxxxxxxxxxxx"
-                              className="w-full bg-brand-dark border border-brand-border rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-accent1"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-brand-muted font-medium mb-1.5">Name Input Name (e.g. entry.XXXXXX)</label>
-                            <input
-                              type="text"
-                              value={manualConfig.nameEntryId || ""}
-                              onChange={(e) => setManualConfig({ ...manualConfig, nameEntryId: e.target.value })}
-                              placeholder="entry.123456789"
-                              className="w-full bg-brand-dark border border-brand-border rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-accent1"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-brand-muted font-medium mb-1.5">Email Input Name</label>
-                            <input
-                              type="text"
-                              value={manualConfig.emailEntryId || ""}
-                              onChange={(e) => setManualConfig({ ...manualConfig, emailEntryId: e.target.value })}
-                              placeholder="entry.234567890"
-                              className="w-full bg-brand-dark border border-brand-border rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-accent1"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-brand-muted font-medium mb-1.5">Subject Input Name</label>
-                            <input
-                              type="text"
-                              value={manualConfig.subjectEntryId || ""}
-                              onChange={(e) => setManualConfig({ ...manualConfig, subjectEntryId: e.target.value })}
-                              placeholder="entry.345678901"
-                              className="w-full bg-brand-dark border border-brand-border rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-accent1"
-                            />
-                          </div>
-                          <div className="sm:col-span-2">
-                            <label className="block text-xs text-brand-muted font-medium mb-1.5">Message Input Name</label>
-                            <input
-                              type="text"
-                              value={manualConfig.messageEntryId || ""}
-                              onChange={(e) => setManualConfig({ ...manualConfig, messageEntryId: e.target.value })}
-                              placeholder="entry.456789012"
-                              className="w-full bg-brand-dark border border-brand-border rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-accent1"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Save Status / Button */}
-                      <div className="pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-t border-brand-border">
-                        <div>
-                          {saveStatus.success && (
-                            <p className="text-xs text-green-400 font-semibold flex items-center gap-1.5">
-                              <i className="fas fa-check-circle"></i>
-                              <span>Configuration successfully saved to Cloud Firestore!</span>
-                            </p>
-                          )}
-                          {saveStatus.error && (
-                            <p className="text-xs text-red-400 font-semibold flex items-center gap-1.5">
-                              <i className="fas fa-exclamation-triangle"></i>
-                              <span>{saveStatus.error}</span>
-                            </p>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={handleSaveConfig}
-                          disabled={saveStatus.loading}
-                          className="bg-gradient-to-r from-brand-accent1 to-brand-accent2 hover:opacity-90 text-white font-bold px-6 py-3.5 rounded-xl transition-all flex items-center gap-2 justify-center cursor-pointer disabled:opacity-50"
-                        >
-                          {saveStatus.loading ? (
-                            <i className="fas fa-spinner animate-spin"></i>
-                          ) : (
-                            <i className="fas fa-cloud-upload-alt"></i>
-                          )}
-                          <span>{saveStatus.loading ? "Saving Settings..." : "Save Settings"}</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TAB 2: Responses/Inquiries */}
-                  {activeTab === "responses" && (
-                    <div className="space-y-6">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <div>
-                          <h4 className="text-xl font-bold text-white mb-2">Collaboration Inquiries</h4>
-                          <p className="text-sm text-brand-muted">Inspect recent queries submitted through Google Forms in real time.</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={handleLoadSubmissions}
-                          disabled={loadingResponses}
-                          className="w-10 h-10 rounded-xl bg-brand-dark border border-brand-border hover:border-brand-accent1 hover:text-white flex items-center justify-center transition-all cursor-pointer disabled:opacity-50"
-                          title="Reload Submissions"
-                        >
-                          <i className={`fas fa-sync-alt ${loadingResponses ? "animate-spin" : ""}`}></i>
-                        </button>
-                      </div>
-
-                      {/* Search Bar */}
-                      <div className="relative">
-                        <i className="fas fa-search absolute left-4 top-3.5 text-brand-muted text-sm"></i>
-                        <input
-                          type="text"
-                          placeholder="Search inquiries by name, email, query text..."
-                          value={searchTerm}
-                          onChange={(e) => setSearchTerm(e.target.value)}
-                          className="w-full bg-brand-dark border border-brand-border rounded-xl pl-11 pr-4 py-3 text-sm text-white focus:outline-none focus:border-brand-accent1"
-                        />
-                      </div>
-
-                      {/* Submissions List Container */}
-                      <div className="space-y-4">
-                        {loadingResponses ? (
-                          /* Loading Spinner */
-                          <div className="py-20 text-center text-brand-muted flex flex-col items-center gap-3">
-                            <i className="fas fa-spinner animate-spin text-3xl text-brand-accent1"></i>
-                            <span className="text-sm">Loading Google Form Submissions...</span>
-                          </div>
-                        ) : responsesError ? (
-                          /* Error State */
-                          <div className="p-6 bg-red-500/10 border border-red-500/20 rounded-2xl text-center max-w-lg mx-auto">
-                            <i className="fas fa-exclamation-triangle text-3xl text-red-400 mb-3"></i>
-                            <h5 className="text-base font-bold text-white mb-2">Connection Blocked</h5>
-                            <p className="text-xs text-brand-muted leading-relaxed mb-4">
-                              {responsesError}
-                            </p>
-                            <div className="text-left bg-brand-dark/50 p-4 rounded-xl text-xs space-y-1.5 text-brand-muted">
-                              <p className="font-semibold text-white">Troubleshooting checklist:</p>
-                              <p>1. Make sure Google Forms API is enabled on Google Cloud.</p>
-                              <p>2. Verify your Form ID is fully valid & accessible to your user.</p>
-                              <p>3. Reload this portal or complete authentication again.</p>
-                            </div>
-                          </div>
-                        ) : filteredResponses.length === 0 ? (
-                          /* Empty State */
-                          <div className="p-12 border border-dashed border-brand-border rounded-2xl text-center text-brand-muted">
-                            <i className="fas fa-folder-open text-3xl mb-3 text-brand-muted/50"></i>
-                            <p className="text-sm font-semibold text-white">No Inquiries Found</p>
-                            <p className="text-xs mt-1">
-                              {searchTerm ? "No records match your current search terms." : "Your Google Form hasn't received any inquiries yet!"}
-                            </p>
-                          </div>
-                        ) : (
-                          /* Cards list */
-                          <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-2">
-                            {filteredResponses.map((resp) => {
-                              // Identify standard fields from mapped question titles
-                              const entries = Object.entries(resp.answers) as [string, string][];
-                              const nameVal = entries.find(([k]) => k.toLowerCase().includes("name"))?.[1] || "";
-                              const emailVal = entries.find(([k]) => k.toLowerCase().includes("email"))?.[1] || "";
-                              const subjectVal = entries.find(([k]) => k.toLowerCase().includes("subject"))?.[1] || "";
-                              const messageVal = entries.find(([k]) => k.toLowerCase().includes("message"))?.[1] || "";
-
-                              return (
-                                <div key={resp.responseId} className="p-6 bg-brand-dark/30 border border-brand-border rounded-2xl space-y-4 hover:border-brand-accent1/30 transition-all">
-                                  <div className="flex items-start justify-between gap-4 flex-wrap">
-                                    <div>
-                                      <h6 className="font-bold text-white text-base">{nameVal || "Anonymous Inquiry"}</h6>
-                                      {emailVal && (
-                                        <p className="text-xs text-brand-accent1 hover:underline mt-0.5">
-                                          <a href={`mailto:${emailVal}`}>{emailVal}</a>
-                                        </p>
-                                      )}
-                                    </div>
-                                    <span className="text-xs text-brand-muted font-mono">{resp.submittedAt}</span>
-                                  </div>
-
-                                  {subjectVal && (
-                                    <div className="text-sm font-semibold text-white">
-                                      <span className="text-brand-muted text-xs mr-1 font-normal">Subject:</span>
-                                      {subjectVal}
-                                    </div>
-                                  )}
-
-                                  {messageVal && (
-                                    <p className="text-sm text-brand-muted leading-relaxed whitespace-pre-line bg-brand-dark/40 p-4 rounded-xl border border-brand-border/30">
-                                      {messageVal}
-                                    </p>
-                                  )}
-
-                                  {/* Dynamic Questions (for any unmapped questions in their form) */}
-                                  {entries.length > 0 && (
-                                    <div className="pt-2 border-t border-brand-border/20 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                      {entries.map(([qTitle, qVal]) => {
-                                        const lower = qTitle.toLowerCase();
-                                        if (lower.includes("name") || lower.includes("email") || lower.includes("subject") || lower.includes("message")) {
-                                          return null;
-                                        }
-                                        return (
-                                          <div key={qTitle} className="text-xs bg-brand-dark/20 p-2.5 rounded-lg border border-brand-border/10">
-                                            <span className="font-bold text-white block mb-0.5">{qTitle}</span>
-                                            <span className="text-brand-muted">{qVal || "—"}</span>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-
-                                  {/* Actions */}
-                                  {emailVal && (
-                                    <div className="flex justify-end pt-2">
-                                      <a
-                                        href={`mailto:${emailVal}?subject=Re: ${encodeURIComponent(subjectVal || "Collaboration Inquiry")}`}
-                                        className="text-xs font-bold text-brand-accent2 hover:text-white flex items-center gap-1.5 bg-brand-accent2/10 hover:bg-brand-accent2/20 px-3.5 py-2 rounded-lg border border-brand-accent2/20 transition-all"
-                                      >
-                                        <i className="fas fa-reply"></i>
-                                        <span>Reply via Email</span>
-                                      </a>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

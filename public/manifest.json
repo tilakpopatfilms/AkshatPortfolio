@@ -6,7 +6,7 @@
   "display": "standalone",
   "background_color": "#050505",
   "theme_color": "#050505",
-  "orientation": "portrait",
+  "orientation": "any",
   "icons": [
     {
       "src": "https://i.ibb.co/m5wyQ5DK/14280-removebg-preview.png",
