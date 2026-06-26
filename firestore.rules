@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == "work.tilakpopatfilms@gmail.com";
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Configuration validations
+    function isValidConfig(data) {
+      return data.keys().hasAll(['formId', 'isEnabled', 'useWeb3Forms', 'updatedAt', 'updatedBy'])
+        && data.keys().size() <= 10
+        && data.formId is string && data.formId.size() <= 128
+        && data.isEnabled is bool
+        && data.useWeb3Forms is bool
+        && data.updatedBy is string && data.updatedBy.size() <= 128
+        && (!data.keys().hasAny(['prefilledUrl']) || (data.prefilledUrl is string && data.prefilledUrl.size() <= 1024))
+        && (!data.keys().hasAny(['nameEntryId']) || (data.nameEntryId is string && data.nameEntryId.size() <= 128))
+        && (!data.keys().hasAny(['emailEntryId']) || (data.emailEntryId is string && data.emailEntryId.size() <= 128))
+        && (!data.keys().hasAny(['subjectEntryId']) || (data.subjectEntryId is string && data.subjectEntryId.size() <= 128))
+        && (!data.keys().hasAny(['messageEntryId']) || (data.messageEntryId is string && data.messageEntryId.size() <= 128));
+    }
+
+    // Config collection rules
+    match /configs/{configId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(configId) && isValidConfig(request.resource.data);
+    }
+  }
+}
